@@ -1,0 +1,25 @@
+{
+  "name": "treewise",
+  "version": "1.0.0",
+  "description": "'treewise' is a TypeScript utility library providing functions for deep copying objects and arrays, processing arrays in batches, and performing various operations on tree data structures.",
+  "main": "treewise.ts",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pouyapanahandeh/treewise.git#main"
+  },
+  "author": "pooyanpm panahandehpooya@gmail.com",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/pouyapanahandeh/treewise/issues"
+  },
+  "homepage": "https://github.com/pouyapanahandeh/treewise/tree/main#readme",
+  "devDependencies": {
+    "@types/jest": "^29.5.11",
+    "@types/mocha": "^10.0.6",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1"
+  }
+}
