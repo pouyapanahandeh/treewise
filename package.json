@@ -1,6 +1,6 @@
 {
   "name": "treewise",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "'treewise' is a TypeScript utility library providing functions for deep copying objects and arrays, processing arrays in batches, and performing various operations on tree data structures.",
   "main": "treewise.ts",
   "scripts": {
