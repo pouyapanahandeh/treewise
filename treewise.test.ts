@@ -374,6 +374,341 @@ describe('Treewise', () => {
       expect(ascii).toMatch(/- 6001/);
     });
   });
+
+  describe('moveNode', () => {
+    let rootNode: TTreeNode<TestNode>;
+    let child1: TTreeNode<TestNode>;
+    let child2: TTreeNode<TestNode>;
+
+    beforeEach(() => {
+      rootNode = { value: { id: 1000, name: 'Root' } };
+      tree.addRoot(rootNode);
+      child1 = tree.addNodeAsChild(rootNode, { id: 1001, name: 'Child1' });
+      child2 = tree.addNodeAsChild(rootNode, { id: 1002, name: 'Child2' });
+    });
+
+    it('moves a node to a new parent', () => {
+      const grandchild = tree.addNodeAsChild(child1, { id: 1003, name: 'Grandchild' });
+      
+      tree.moveNode(grandchild, child2);
+      
+      expect(grandchild.parent).toBe(child2);
+      expect(child2.children).toContain(grandchild);
+      expect(child1.children).not.toContain(grandchild);
+    });
+
+    it('prevents circular references', () => {
+      const grandchild = tree.addNodeAsChild(child1, { id: 1003, name: 'Grandchild' });
+      
+      expect(() => tree.moveNode(child1, grandchild)).toThrow('circular reference');
+    });
+
+    it('emits onNodeMoved event', () => {
+      const moveHandler = jest.fn();
+      tree.on('onNodeMoved', moveHandler);
+      
+      const grandchild = tree.addNodeAsChild(child1, { id: 1003, name: 'Grandchild' });
+      tree.moveNode(grandchild, child2);
+      
+      expect(moveHandler).toHaveBeenCalledWith(grandchild);
+    });
+
+    it('moves a root node to be a child', () => {
+      const root2: TTreeNode<TestNode> = { value: { id: 2000, name: 'Root2' } };
+      tree.addRoot(root2);
+      
+      tree.moveNode(root2, child1);
+      
+      expect(tree.roots).not.toContain(root2);
+      expect(root2.parent).toBe(child1);
+      expect(child1.children).toContain(root2);
+    });
+  });
+
+  describe('Path Operations', () => {
+    let rootNode: TTreeNode<TestNode>;
+    let child1: TTreeNode<TestNode>;
+    let grandchild: TTreeNode<TestNode>;
+
+    beforeEach(() => {
+      rootNode = { value: { id: 100, name: 'Root' } };
+      tree.addRoot(rootNode);
+      child1 = tree.addNodeAsChild(rootNode, { id: 101, name: 'Child1' });
+      grandchild = tree.addNodeAsChild(child1, { id: 102, name: 'Grandchild' });
+    });
+
+    it('getPath returns correct path from root to node', () => {
+      const path = tree.getPath(grandchild);
+      expect(path).toHaveLength(3);
+      expect(path[0]).toBe(rootNode);
+      expect(path[1]).toBe(child1);
+      expect(path[2]).toBe(grandchild);
+    });
+
+    it('getPath returns single node for root', () => {
+      const path = tree.getPath(rootNode);
+      expect(path).toHaveLength(1);
+      expect(path[0]).toBe(rootNode);
+    });
+
+    it('findPath returns path between two nodes', () => {
+      const child2 = tree.addNodeAsChild(rootNode, { id: 103, name: 'Child2' });
+      const path = tree.findPath(child1, child2);
+      
+      expect(path).not.toBeNull();
+      expect(path).toContain(rootNode);
+    });
+
+    it('findPath returns null for nodes in different trees', () => {
+      const root2 = { value: { id: 200, name: 'Root2' } };
+      tree.addRoot(root2);
+      const child2 = tree.addNodeAsChild(root2, { id: 201, name: 'Child2' });
+      
+      const path = tree.findPath(child1, child2);
+      expect(path).toBeNull();
+    });
+
+    it('getAncestors returns all ancestors', () => {
+      const ancestors = tree.getAncestors(grandchild);
+      expect(ancestors).toHaveLength(2);
+      expect(ancestors[0]).toBe(child1);
+      expect(ancestors[1]).toBe(rootNode);
+    });
+
+    it('getAncestors returns empty array for root', () => {
+      const ancestors = tree.getAncestors(rootNode);
+      expect(ancestors).toHaveLength(0);
+    });
+
+    it('getDescendants returns all descendants', () => {
+      const child2 = tree.addNodeAsChild(rootNode, { id: 103, name: 'Child2' });
+      tree.addNodeAsChild(child2, { id: 104, name: 'Grandchild2' });
+      
+      const descendants = tree.getDescendants(rootNode);
+      expect(descendants).toHaveLength(4);
+    });
+
+    it('isAncestorOf returns true for ancestor', () => {
+      expect(tree.isAncestorOf(rootNode, grandchild)).toBe(true);
+      expect(tree.isAncestorOf(child1, grandchild)).toBe(true);
+    });
+
+    it('isAncestorOf returns false for non-ancestor', () => {
+      const child2 = tree.addNodeAsChild(rootNode, { id: 103, name: 'Child2' });
+      expect(tree.isAncestorOf(child2, grandchild)).toBe(false);
+      expect(tree.isAncestorOf(grandchild, rootNode)).toBe(false);
+    });
+  });
+
+  describe('Sibling Operations', () => {
+    let rootNode: TTreeNode<TestNode>;
+    let child1: TTreeNode<TestNode>;
+    let child2: TTreeNode<TestNode>;
+    let child3: TTreeNode<TestNode>;
+
+    beforeEach(() => {
+      rootNode = { value: { id: 100, name: 'Root' } };
+      tree.addRoot(rootNode);
+      child1 = tree.addNodeAsChild(rootNode, { id: 101, name: 'Child1' });
+      child2 = tree.addNodeAsChild(rootNode, { id: 102, name: 'Child2' });
+      child3 = tree.addNodeAsChild(rootNode, { id: 103, name: 'Child3' });
+    });
+
+    it('getSiblings returns all siblings', () => {
+      const siblings = tree.getSiblings(child2);
+      expect(siblings).toHaveLength(2);
+      expect(siblings).toContain(child1);
+      expect(siblings).toContain(child3);
+      expect(siblings).not.toContain(child2);
+    });
+
+    it('getSiblings returns other roots for root nodes', () => {
+      const root2 = { value: { id: 200, name: 'Root2' } };
+      tree.addRoot(root2);
+      
+      const siblings = tree.getSiblings(rootNode);
+      expect(siblings).toContain(root2);
+      expect(siblings).not.toContain(rootNode);
+    });
+
+    it('getNextSibling returns next sibling', () => {
+      const next = tree.getNextSibling(child1);
+      expect(next).toBe(child2);
+    });
+
+    it('getNextSibling returns null for last child', () => {
+      const next = tree.getNextSibling(child3);
+      expect(next).toBeNull();
+    });
+
+    it('getPreviousSibling returns previous sibling', () => {
+      const prev = tree.getPreviousSibling(child2);
+      expect(prev).toBe(child1);
+    });
+
+    it('getPreviousSibling returns null for first child', () => {
+      const prev = tree.getPreviousSibling(child1);
+      expect(prev).toBeNull();
+    });
+  });
+
+  describe('Filter and Map Operations', () => {
+    beforeEach(() => {
+      const rootNode = { value: { id: 1, name: 'Root' } };
+      tree.addRoot(rootNode);
+      tree.addNodeAsChild(rootNode, { id: 2, name: 'Child1' });
+      tree.addNodeAsChild(rootNode, { id: 3, name: 'Child2' });
+    });
+
+    it('filterNodes returns matching nodes', () => {
+      const filtered = tree.filterNodes(node => node.value.id > 1);
+      expect(filtered).toHaveLength(2);
+      expect(filtered.every(node => node.value.id > 1)).toBe(true);
+    });
+
+    it('filterNodes returns empty array when no matches', () => {
+      const filtered = tree.filterNodes(node => node.value.id > 100);
+      expect(filtered).toHaveLength(0);
+    });
+
+    it('mapNodes transforms all nodes', () => {
+      const mapped = tree.mapNodes((node, depth) => ({
+        id: node.value.id,
+        depth,
+      }));
+      
+      expect(mapped).toHaveLength(3);
+      expect(mapped[0]).toEqual({ id: 1, depth: 0 });
+    });
+  });
+
+  describe('Tree Validation', () => {
+    it('validateTree returns valid for correct tree', () => {
+      const rootNode = { value: { id: 1, name: 'Root' } };
+      tree.addRoot(rootNode);
+      tree.addNodeAsChild(rootNode, { id: 2, name: 'Child' });
+      
+      const result = tree.validateTree();
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('validateTree detects duplicate IDs', () => {
+      const rootNode = { value: { id: 1, name: 'Root' } };
+      tree.addRoot(rootNode);
+      const child = tree.addNodeAsChild(rootNode, { id: 1, name: 'Child' });
+      
+      const result = tree.validateTree();
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('Duplicate ID'))).toBe(true);
+    });
+
+    it('validateTree detects inconsistent parent references', () => {
+      const rootNode: TTreeNode<TestNode> = { value: { id: 1, name: 'Root' } };
+      tree.addRoot(rootNode);
+      const child: TTreeNode<TestNode> = { value: { id: 2 }, parent: undefined };
+      rootNode.children = [child];
+      
+      const result = tree.validateTree();
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('Inconsistent parent'))).toBe(true);
+    });
+
+    it('hasCircularReference returns false for valid tree', () => {
+      const rootNode = { value: { id: 1, name: 'Root' } };
+      tree.addRoot(rootNode);
+      
+      expect(tree.hasCircularReference()).toBe(false);
+    });
+  });
+
+  describe('Tree Statistics', () => {
+    beforeEach(() => {
+      const rootNode = { value: { id: 1, name: 'Root' } };
+      tree.addRoot(rootNode);
+      const child1 = tree.addNodeAsChild(rootNode, { id: 2, name: 'Child1' });
+      const child2 = tree.addNodeAsChild(rootNode, { id: 3, name: 'Child2' });
+      tree.addNodeAsChild(child1, { id: 4, name: 'Grandchild1' });
+      tree.addNodeAsChild(child2, { id: 5, name: 'Grandchild2' });
+      tree.addNodeAsChild(child2, { id: 6, name: 'Grandchild3' });
+    });
+
+    it('getWidth returns maximum width', () => {
+      const width = tree.getWidth();
+      expect(width).toBe(3); // Level 2 has 3 nodes
+    });
+
+    it('getNodesAtDepth returns correct nodes', () => {
+      const nodesAtDepth1 = tree.getNodesAtDepth(1);
+      expect(nodesAtDepth1).toHaveLength(2);
+      
+      const nodesAtDepth2 = tree.getNodesAtDepth(2);
+      expect(nodesAtDepth2).toHaveLength(3);
+    });
+
+    it('getStatistics returns complete statistics', () => {
+      const stats = tree.getStatistics();
+      expect(stats.depth).toBe(2);
+      expect(stats.width).toBe(3);
+      expect(stats.nodeCount).toBe(6);
+      expect(stats.leafCount).toBe(3);
+      expect(stats.rootCount).toBe(1);
+    });
+  });
+
+  describe('Improved Serialization', () => {
+    beforeEach(() => {
+      const rootNode = { value: { id: 1, name: 'Root' } };
+      tree.addRoot(rootNode);
+      tree.addNodeAsChild(rootNode, { id: 2, name: 'Child1' });
+      tree.addNodeAsChild(rootNode, { id: 3, name: 'Child2' });
+    });
+
+    it('serializeFlat creates flat format with parent IDs', () => {
+      const flat = tree.serializeFlat();
+      expect(flat).toHaveLength(3);
+      expect(flat[0]).toMatchObject({ id: 1, name: 'Root', parentId: null });
+      expect(flat.find(n => n.id === 2)?.parentId).toBe(1);
+    });
+
+    it('deserializeFlat reconstructs tree from flat format', () => {
+      const flat = tree.serializeFlat();
+      const newTree = new Treewise<TestNode>();
+      
+      newTree.deserializeFlat(flat);
+      
+      expect(newTree.countNodes()).toBe(3);
+      expect(newTree.roots).toHaveLength(1);
+      expect(newTree.roots[0].children).toHaveLength(2);
+    });
+
+    it('toJSON creates nested JSON format', () => {
+      const json = tree.toJSON();
+      expect(json).toHaveLength(1);
+      expect(json[0].id).toBe(1);
+      expect(json[0].children).toHaveLength(2);
+    });
+
+    it('fromJSON reconstructs tree from nested JSON', () => {
+      const json = tree.toJSON();
+      const newTree = new Treewise<TestNode>();
+      
+      newTree.fromJSON(json);
+      
+      expect(newTree.countNodes()).toBe(3);
+      expect(newTree.roots).toHaveLength(1);
+      expect(newTree.roots[0].children).toHaveLength(2);
+    });
+
+    it('round-trip serialization preserves structure', () => {
+      const flat = tree.serializeFlat();
+      const newTree = new Treewise<TestNode>();
+      newTree.deserializeFlat(flat);
+      
+      const flat2 = newTree.serializeFlat();
+      expect(flat2).toEqual(flat);
+    });
+  });
 });
 
 describe('Utility Functions', () => {

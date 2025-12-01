@@ -277,11 +277,180 @@ export class Treewise<T extends Identifiable> {
   }
 
   /**
-   * Stub for node re-parenting, emitting onNodeMoved if needed.
+   * Moves a node to a new parent, with circular reference detection.
+   * Throws if the move would create a circular reference.
    */
   moveNode(node: TTreeNode<T>, newParent: TTreeNode<T>): void {
-    // Actual re-parenting logic omitted.
+    if (!node || !newParent) {
+      throw new Error('Node and new parent must be provided.');
+    }
+
+    // Check if newParent is a descendant of node (would create circular reference)
+    if (this.isAncestorOf(node, newParent)) {
+      throw new Error('Cannot move node: would create circular reference.');
+    }
+
+    // Remove from current parent or roots
+    const rootIndex = this.roots.indexOf(node);
+    if (rootIndex !== -1) {
+      this.roots.splice(rootIndex, 1);
+    } else if (node.parent && node.parent.children) {
+      const index = node.parent.children.indexOf(node);
+      if (index !== -1) {
+        node.parent.children.splice(index, 1);
+      }
+    }
+
+    // Add to new parent
+    node.parent = newParent;
+    newParent.children = newParent.children || [];
+    newParent.children.push(node);
+
     this.emit('onNodeMoved', node);
+  }
+
+  /**
+   * Gets the path from root to the specified node.
+   * Returns an array of nodes from root to the target node.
+   */
+  getPath(node: TTreeNode<T>): TTreeNode<T>[] {
+    const path: TTreeNode<T>[] = [];
+    let current: TTreeNode<T> | undefined = node;
+    
+    while (current) {
+      path.unshift(current);
+      current = current.parent;
+    }
+    
+    return path;
+  }
+
+  /**
+   * Finds the path between two nodes.
+   * Returns null if nodes are in different trees.
+   */
+  findPath(from: TTreeNode<T>, to: TTreeNode<T>): TTreeNode<T>[] | null {
+    const fromPath = this.getPath(from);
+    const toPath = this.getPath(to);
+    
+    // Find common ancestor
+    let commonAncestorIndex = 0;
+    while (
+      commonAncestorIndex < fromPath.length &&
+      commonAncestorIndex < toPath.length &&
+      fromPath[commonAncestorIndex] === toPath[commonAncestorIndex]
+    ) {
+      commonAncestorIndex++;
+    }
+    
+    if (commonAncestorIndex === 0) {
+      return null; // Different trees
+    }
+    
+    // Build path: from -> common ancestor -> to
+    const pathUp = fromPath.slice(commonAncestorIndex - 1).reverse();
+    const pathDown = toPath.slice(commonAncestorIndex);
+    
+    return [...pathUp, ...pathDown];
+  }
+
+  /**
+   * Gets all ancestors of a node (from parent to root).
+   */
+  getAncestors(node: TTreeNode<T>): TTreeNode<T>[] {
+    const ancestors: TTreeNode<T>[] = [];
+    let current = node.parent;
+    
+    while (current) {
+      ancestors.push(current);
+      current = current.parent;
+    }
+    
+    return ancestors;
+  }
+
+  /**
+   * Gets all descendants of a node.
+   */
+  getDescendants(node: TTreeNode<T>): TTreeNode<T>[] {
+    const descendants: TTreeNode<T>[] = [];
+    
+    if (node.children) {
+      for (const child of node.children) {
+        descendants.push(child);
+        descendants.push(...this.getDescendants(child));
+      }
+    }
+    
+    return descendants;
+  }
+
+  /**
+   * Checks if a node is an ancestor of another node.
+   */
+  isAncestorOf(ancestor: TTreeNode<T>, descendant: TTreeNode<T>): boolean {
+    let current = descendant.parent;
+    
+    while (current) {
+      if (current === ancestor) {
+        return true;
+      }
+      current = current.parent;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Gets all siblings of a node (nodes with the same parent).
+   */
+  getSiblings(node: TTreeNode<T>): TTreeNode<T>[] {
+    if (!node.parent) {
+      // Root node - siblings are other roots
+      return this.roots.filter(root => root !== node);
+    }
+    
+    if (!node.parent.children) {
+      return [];
+    }
+    
+    return node.parent.children.filter(child => child !== node);
+  }
+
+  /**
+   * Gets the next sibling of a node.
+   */
+  getNextSibling(node: TTreeNode<T>): TTreeNode<T> | null {
+    const siblings = node.parent ? node.parent.children : this.roots;
+    
+    if (!siblings) {
+      return null;
+    }
+    
+    const index = siblings.indexOf(node);
+    if (index === -1 || index === siblings.length - 1) {
+      return null;
+    }
+    
+    return siblings[index + 1];
+  }
+
+  /**
+   * Gets the previous sibling of a node.
+   */
+  getPreviousSibling(node: TTreeNode<T>): TTreeNode<T> | null {
+    const siblings = node.parent ? node.parent.children : this.roots;
+    
+    if (!siblings) {
+      return null;
+    }
+    
+    const index = siblings.indexOf(node);
+    if (index <= 0) {
+      return null;
+    }
+    
+    return siblings[index - 1];
   }
 
   /**
@@ -308,6 +477,98 @@ export class Treewise<T extends Identifiable> {
   }
 
   /**
+   * Filters nodes based on a predicate.
+   */
+  filterNodes(predicate: (node: TTreeNode<T>) => boolean): TTreeNode<T>[] {
+    const filtered: TTreeNode<T>[] = [];
+    this.traverse((node) => {
+      if (predicate(node)) {
+        filtered.push(node);
+      }
+    });
+    return filtered;
+  }
+
+  /**
+   * Maps all nodes to a new array using a transformation function.
+   */
+  mapNodes<U>(mapFn: (node: TTreeNode<T>, depth: number) => U): U[] {
+    const result: U[] = [];
+    this.traverse((node, depth) => {
+      result.push(mapFn(node, depth));
+    });
+    return result;
+  }
+
+  /**
+   * Validates the tree structure for circular references and orphaned nodes.
+   * Returns an object with validation results.
+   */
+  validateTree(): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+    const visitedNodes = new Set<TTreeNode<T>>();
+
+    // Check for circular references using path tracking
+    const checkCircular = (node: TTreeNode<T>, path: Set<TTreeNode<T>>): void => {
+      if (path.has(node)) {
+        errors.push(`Circular reference detected at node ${node.value.id}`);
+        return;
+      }
+
+      if (visitedNodes.has(node)) {
+        return; // Already checked this subtree
+      }
+
+      visitedNodes.add(node);
+      path.add(node);
+
+      if (node.children) {
+        for (const child of node.children) {
+          // Check parent reference consistency
+          if (child.parent !== node) {
+            errors.push(
+              `Inconsistent parent reference at node ${child.value.id}`
+            );
+          }
+          checkCircular(child, new Set(path));
+        }
+      }
+    };
+
+    for (const root of this.roots) {
+      if (root.parent) {
+        errors.push(`Root node ${root.value.id} has a parent reference`);
+      }
+      checkCircular(root, new Set());
+    }
+
+    // Check for duplicate IDs
+    const idCounts = new Map<number, number>();
+    this.traverse((node) => {
+      const count = idCounts.get(node.value.id) || 0;
+      idCounts.set(node.value.id, count + 1);
+    });
+
+    for (const [id, count] of idCounts.entries()) {
+      if (count > 1) {
+        errors.push(`Duplicate ID ${id} found ${count} times`);
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+    };
+  }
+
+  /**
+   * Checks if the tree has any circular references.
+   */
+  hasCircularReference(): boolean {
+    return !this.validateTree().valid;
+  }
+
+  /**
    * Computes the maximum depth among all roots.
    */
   getDepth(): number {
@@ -325,6 +586,53 @@ export class Treewise<T extends Identifiable> {
    */
   countNodes(): number {
     return this.nodeIndex.size;
+  }
+
+  /**
+   * Gets the maximum width (number of nodes at any level) of the tree.
+   */
+  getWidth(): number {
+    const levelCounts = new Map<number, number>();
+    
+    this.traverse((node, depth) => {
+      levelCounts.set(depth, (levelCounts.get(depth) || 0) + 1);
+    });
+    
+    return Math.max(...Array.from(levelCounts.values()), 0);
+  }
+
+  /**
+   * Gets all nodes at a specific depth level.
+   */
+  getNodesAtDepth(targetDepth: number): TTreeNode<T>[] {
+    const nodes: TTreeNode<T>[] = [];
+    
+    this.traverse((node, depth) => {
+      if (depth === targetDepth) {
+        nodes.push(node);
+      }
+    });
+    
+    return nodes;
+  }
+
+  /**
+   * Calculates tree statistics including depth, width, node count, and leaf count.
+   */
+  getStatistics(): {
+    depth: number;
+    width: number;
+    nodeCount: number;
+    leafCount: number;
+    rootCount: number;
+  } {
+    return {
+      depth: this.getDepth(),
+      width: this.getWidth(),
+      nodeCount: this.countNodes(),
+      leafCount: this.findLeafNodes().length,
+      rootCount: this.roots.length,
+    };
   }
 
   /**
@@ -424,6 +732,97 @@ export class Treewise<T extends Identifiable> {
     for (const root of this.roots) {
       this.reconstructParentReferences(root, null);
       this.indexNodeAndChildren(root);
+    }
+  }
+
+  /**
+   * Serializes the tree to a flat format with parent ID references.
+   * Useful for database storage.
+   */
+  serializeFlat(): Array<T & { parentId: number | null }> {
+    const flat: Array<T & { parentId: number | null }> = [];
+    
+    this.traverse((node) => {
+      flat.push({
+        ...node.value,
+        parentId: node.parent ? node.parent.value.id : null,
+      });
+    });
+    
+    return flat;
+  }
+
+  /**
+   * Deserializes from a flat format with parent ID references.
+   * Reconstructs the tree structure from flat data.
+   */
+  deserializeFlat(flatData: Array<T & { parentId: number | null }>): void {
+    this.removeAllRoots();
+    
+    const nodeMap = new Map<number, TTreeNode<T>>();
+    
+    // First pass: create all nodes
+    for (const item of flatData) {
+      const { parentId, ...value } = item;
+      const node: TTreeNode<T> = { value: value as any as T };
+      nodeMap.set(item.id, node);
+    }
+    
+    // Second pass: establish relationships
+    for (const item of flatData) {
+      const node = nodeMap.get(item.id)!;
+      
+      if (item.parentId === null) {
+        // Root node
+        this.addRoot(node);
+      } else {
+        // Child node
+        const parent = nodeMap.get(item.parentId);
+        if (parent) {
+          node.parent = parent;
+          parent.children = parent.children || [];
+          parent.children.push(node);
+          this.indexNodeAndChildren(node);
+        }
+      }
+    }
+  }
+
+  /**
+   * Exports the tree as nested JSON (alternative format).
+   */
+  toJSON(): any {
+    const convertNode = (node: TTreeNode<T>): any => {
+      const result: any = { ...node.value };
+      if (node.children && node.children.length > 0) {
+        result.children = node.children.map(convertNode);
+      }
+      return result;
+    };
+    
+    return this.roots.map(convertNode);
+  }
+
+  /**
+   * Imports tree from nested JSON format.
+   */
+  fromJSON(jsonData: any[]): void {
+    this.removeAllRoots();
+    
+    const buildNode = (data: any, parent?: TTreeNode<T>): TTreeNode<T> => {
+      const { children, ...value } = data;
+      const node: TTreeNode<T> = { value: value as T, parent };
+      
+      if (children && Array.isArray(children)) {
+        node.children = children.map((childData) => buildNode(childData, node));
+      }
+      
+      return node;
+    };
+    
+    for (const rootData of jsonData) {
+      const rootNode = buildNode(rootData);
+      this.addRoot(rootNode);
     }
   }
 
